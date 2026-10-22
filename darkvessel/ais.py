@@ -77,14 +77,18 @@ def _hull_centre(lat, lon, row, heading_deg):
     return _offset(lat, lon, de, dn)
 
 
-def fix_at(track: pd.DataFrame, t, mode="interp", max_gap_s=180, max_age_s=900):
+def fix_at(track: pd.DataFrame, t, mode="interp", max_gap_s=180, max_age_s=900, min_age_s=0):
     """Position of one vessel at time t.
 
     mode="interp": interpolate between the reports either side when both are
         close, else dead-reckon from the nearest earlier report.
     mode="dr":     dead-reckon from the latest report at or before t.
     mode="last":   the latest report before t, unmoved (what a naive matcher does).
+    min_age_s ignores reports newer than t - min_age_s, to mimic AIS heard from
+    orbit, where message collisions leave minutes between received reports.
     """
+    if min_age_s:
+        track = track[track.t <= t - timedelta(seconds=min_age_s)]
     before = track[track.t <= t]
     after = track[track.t > t]
     p = before.iloc[-1] if len(before) else None
