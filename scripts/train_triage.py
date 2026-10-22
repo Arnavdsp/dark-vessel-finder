@@ -73,7 +73,7 @@ def main():
     # rank the held-out alerts for the results page
     alerts = [(float(s), ref_) for s, ref_, lab in zip(p, np.array(ref, dtype=object)[te], yt) if lab == 0]
     ranked = sorted(alerts, key=lambda a: -a[0])
-    out["test_alerts"] = [dict(frame=r[0], idx=int(r[1]), score=s) for s, r in ranked]
+    out["ranked_alerts"] = [dict(frame=r[0], idx=int(r[1]), score=s) for s, r in ranked]
     out["alerts_above_threshold"] = int(sum(s >= thr for s, _ in ranked))
     # ship retention by AIS length at the chosen threshold (are small boats ranked down?)
     lengths = lens[te]
@@ -85,7 +85,7 @@ def main():
     out["ships_kept_by_length"] = by_len
     json.dump(out, open("results/triage.json", "w"), indent=1)
     pickle.dump(model, open("results/triage_model.pkl", "wb"))   # trained on 12-14 Oct only
-    print(json.dumps({k: v for k, v in out.items() if k != "test_alerts"}, indent=1))
+    print(json.dumps({k: v for k, v in out.items() if k != "ranked_alerts"}, indent=1))
 
 
 if __name__ == "__main__":

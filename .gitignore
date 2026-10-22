@@ -5,3 +5,5 @@ data/
 *.tif
 *.zip
 results/scene.jpg.b64
+results/real/
+*.pkl
