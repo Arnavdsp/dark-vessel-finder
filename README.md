@@ -81,15 +81,22 @@ ship", but every AIS-paired detection is a ship, so a classifier trained to
 separate AIS-paired detections from unexplained alerts ranks alerts by how
 ship-like they look (positive-unlabelled learning). Features are brightness,
 size, background texture, edge strength, compactness, distance to coast and
-re-sighting. Trained on 12-14 October, tested on 19 October:
+re-sighting. Trained on 12-14 October, tested on 19 October. The review
+threshold is set on the training days (leave-one-day-out scores, cut to keep
+95% of AIS ships) and applied unchanged to the test day:
 
-| | AUC | alerts left when 95% of AIS ships are kept |
-|---|---|---|
-| brightness only | 0.93 | 39% |
-| triage model | 0.97 | 15% (311 of 2,068) |
+| ranking by | AUC | AIS ships kept | alerts left for review |
+|---|---|---|---|
+| brightness only | 0.93 | 95% | 39% |
+| triage model | 0.97 | 96% | 28% (574 of 2,068) |
 
-The model is biased towards large ships: at that threshold it keeps 100% of
-AIS ships over 40 m but 78% of those under 20 m (n = 58).
+The model is biased towards large ships: on the test day it keeps 100% of
+AIS ships over 40 m but 81% of those under 20 m (n = 58).
+
+The labels say which detections are ships, not which alerts are. So the
+model is known to keep AIS ships; how many real dark vessels it ranks below
+the threshold is not measured, and the bias above suggests small dark boats
+are the ones at risk.
 
 Each alert gets a card in `results/alerts.geojson`: score, length,
 brightness over the local sea, nearest AIS vessel and its distance, gate

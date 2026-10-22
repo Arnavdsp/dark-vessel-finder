@@ -6,10 +6,12 @@
  "test_alerts": 2068,
  "auc": 0.9729768604007649,
  "auc_peak_only": 0.9291469635782817,
- "ships_kept": 0.95,
- "alerts_kept": 0.15038684719535783,
- "alerts_kept_peak_only": 0.39410058027079303,
- "threshold": 0.03821287906807302,
+ "target_ships_kept": 0.95,
+ "ships_kept": 0.9631728045325779,
+ "alerts_kept": 0.2775628626692456,
+ "ships_kept_peak_only": 0.9461756373937678,
+ "alerts_kept_peak_only": 0.3853965183752418,
+ "threshold": 0.01636719269007949,
  "ranked_alerts": [
   {
    "frame": "S1D_IW_GRDH_1SDV_20261019T165259_20261019T165324_005087_009A05",
@@ -10352,15 +10354,15 @@
    "score": 9.168531769291863e-05
   }
  ],
- "alerts_above_threshold": 311,
+ "alerts_above_threshold": 574,
  "ships_kept_by_length": {
   "0-20": {
    "n": 58,
-   "kept": 0.7758620689655172
+   "kept": 0.8103448275862069
   },
   "20-40": {
    "n": 39,
-   "kept": 0.9230769230769231
+   "kept": 0.9743589743589743
   },
   "40-100": {
    "n": 70,

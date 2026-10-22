@@ -127,14 +127,14 @@ footer { margin-top: 64px; padding-top: 18px; border-top: 1px solid var(--rule);
     <figure>
       <div class="legend"><span><i style="background:var(--naive)"></i>naive matching</span><span><i style="background:var(--accent)"></i>full pipeline</span></div>
       <svg id="bylen" viewBox="0 0 640 300" width="100%" role="img" aria-label="AIS ships paired by length, naive versus full pipeline"></svg>
-      <figcaption>Share of AIS ships paired with a radar detection, by AIS length. Large ships gain most because they are fast. Boats under 20 m are found about half the time with either matcher: that limit is the 10 m detector, not the matching.</figcaption>
+      <figcaption>Share of AIS ships paired with a radar detection, by AIS length. Large ships gain most because they are fast. Boats under 20 m are found about half the time with either matcher: that limit comes from the 10 m pixels, not the matching.</figcaption>
     </figure>
   </section>
 
   <section>
     <h2 class="col">4. Ranking what is left</h2>
     <div class="col">
-      <p>The remaining alerts are mostly coastline edges, land texture and wakes, with real point targets among them. There is no label for a dark ship, but every AIS-paired detection is a ship. A classifier trained to separate AIS-paired detections from unexplained alerts therefore ranks alerts by how ship-like they look (positive-unlabelled learning). Inputs are brightness, size, background texture, edge strength, compactness, distance to coast and whether the spot was seen on two other days. It was trained on 12–14 October and tested on 19 October.</p>
+      <p>The remaining alerts are mostly coastline edges, land texture and wakes, with real point targets among them. There is no label for a dark ship, but every AIS-paired detection is a ship. A classifier trained to separate AIS-paired detections from unexplained alerts therefore ranks alerts by how ship-like they look (positive-unlabelled learning). Inputs are brightness, size, background texture, edge strength, compactness, distance to coast and whether the spot was seen on two other days. It was trained on 12–14 October and tested on 19 October. Both review thresholds were set on the training days to keep 95% of AIS ships, then applied unchanged to the test day.</p>
     </div>
     <div class="scroll"><table id="triage"></table></div>
     <p class="col" id="triage-bias"></p>
@@ -200,7 +200,7 @@ const naive = V["naive"], full = V["+fixed_structures"];
 const tiles = [
   ["Along-track error, moving ships", `<span class="from">${Math.round(dop.median_abs_error_naive_m)} →</span> ${Math.round(dop.median_abs_error_corrected_m)} m`, `median over ${fmt(dop.n)} ships`],
   ["AIS ships paired on open water", `<span class="from">${pct(naive.pairing_rate_open)} →</span> ${pct(full.pairing_rate_open)}`, `of ${fmt(full.ais_open)} AIS ships`],
-  ["Alerts left for review, held-out day", pct(D.triage.alerts_kept), `keeping ${pct(D.triage.ships_kept)} of AIS-confirmed ships`],
+  ["Alerts left for review, held-out day", pct(D.triage.alerts_kept), `while keeping ${pct(D.triage.ships_kept)} of AIS-confirmed ships`],
 ];
 document.getElementById("tiles").innerHTML = tiles.map(([l, v, n]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
 
@@ -285,9 +285,9 @@ document.getElementById("tiles").innerHTML = tiles.map(([l, v, n]) => `<div clas
 // 4. triage
 (() => {
   const t = D.triage;
-  document.getElementById("triage").innerHTML = `<thead><tr><th>ranking by</th><th class="n">AUC</th><th class="n">alerts left at ${pct(t.ships_kept)} ship retention</th></tr></thead><tbody>
-    <tr><td>brightness only</td><td class="n">${t.auc_peak_only.toFixed(2)}</td><td class="n">${pct(t.alerts_kept_peak_only)}</td></tr>
-    <tr class="final"><td>triage model</td><td class="n">${t.auc.toFixed(2)}</td><td class="n">${pct(t.alerts_kept)} (${fmt(t.alerts_above_threshold)} of ${fmt(t.test_alerts)})</td></tr></tbody>`;
+  document.getElementById("triage").innerHTML = `<thead><tr><th>ranking by</th><th class="n">AUC</th><th class="n">AIS ships kept</th><th class="n">alerts left for review</th></tr></thead><tbody>
+    <tr><td>brightness only</td><td class="n">${t.auc_peak_only.toFixed(2)}</td><td class="n">${pct(t.ships_kept_peak_only)}</td><td class="n">${pct(t.alerts_kept_peak_only)}</td></tr>
+    <tr class="final"><td>triage model</td><td class="n">${t.auc.toFixed(2)}</td><td class="n">${pct(t.ships_kept)}</td><td class="n">${pct(t.alerts_kept)} (${fmt(t.alerts_above_threshold)} of ${fmt(t.test_alerts)})</td></tr></tbody>`;
   const bl = t.ships_kept_by_length;
   document.getElementById("triage-bias").textContent = `Held-out day: ${fmt(t.test_ships)} AIS-paired ships and ${fmt(t.test_alerts)} alerts. The model favours large ships: at this threshold it keeps ${pct(bl[">100"].kept)} of AIS ships over 100 m but ${pct(bl["0-20"].kept)} of those under 20 m (n = ${bl["0-20"].n}), the boats most likely to fish with AIS off.`;
   document.getElementById("cards").innerHTML = D.cards.map(c => `<article class="card">

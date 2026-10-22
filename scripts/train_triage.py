@@ -3,6 +3,8 @@
 Training frames: 12-14 Oct 2026. Test frames: 19 Oct 2026, so no scene (and
 no day's weather) appears on both sides. Positives are AIS-paired detections,
 negatives the unexplained alerts, both on open water inside AIS coverage.
+The review threshold is fixed on the training days (leave-one-day-out scores)
+and then applied unchanged to the test day.
 
 usage: python scripts/train_triage.py   (after scripts/eval_real.py)
 """
@@ -23,6 +25,11 @@ import eval_real as E
 
 TEST_DAY = "2026-10-19"
 KEEP_SHIPS = 0.95
+
+
+def make_model():
+    return HistGradientBoostingClassifier(max_iter=300, learning_rate=0.05, max_leaf_nodes=15,
+                                          l2_regularization=1.0, random_state=0)
 
 
 def build_rows():
@@ -50,26 +57,31 @@ def build_rows():
 def main():
     X, y, day, ref, lens = build_rows()
     tr, te = day != TEST_DAY, day == TEST_DAY
-    model = HistGradientBoostingClassifier(max_iter=300, learning_rate=0.05, max_leaf_nodes=15,
-                                           l2_regularization=1.0, random_state=0)
-    model.fit(X[tr], y[tr])
+    model = make_model().fit(X[tr], y[tr])
     p = model.predict_proba(X[te])[:, 1]
     yt = y[te]
     auc = roc_auc_score(yt, p)
-    # threshold that keeps KEEP_SHIPS of the held-out AIS-confirmed ships
-    thr = np.quantile(p[yt == 1], 1 - KEEP_SHIPS)
-    alerts_kept = float((p[yt == 0] >= thr).mean())
+    peak = X[:, FEATURES.index("log_peak")]
 
-    # the same budget with brightness alone, the obvious baseline
-    peak = X[te][:, FEATURES.index("log_peak")]
-    thr_pk = np.quantile(peak[yt == 1], 1 - KEEP_SHIPS)
-    alerts_kept_peak = float((peak[yt == 0] >= thr_pk).mean())
+    # thresholds come from the training days only: out-of-fold scores, one
+    # day held out at a time, cut where KEEP_SHIPS of AIS ships survive
+    Xtr, ytr, dtr = X[tr], y[tr], day[tr]
+    oof = np.zeros(len(ytr))
+    for d in np.unique(dtr):
+        m = dtr == d
+        oof[m] = make_model().fit(Xtr[~m], ytr[~m]).predict_proba(Xtr[m])[:, 1]
+    thr = float(np.quantile(oof[ytr == 1], 1 - KEEP_SHIPS))
+    thr_pk = float(np.quantile(peak[tr][ytr == 1], 1 - KEEP_SHIPS))
+    pk = peak[te]
+    ships_kept, alerts_kept = float((p[yt == 1] >= thr).mean()), float((p[yt == 0] >= thr).mean())
+    ships_kept_pk, alerts_kept_pk = float((pk[yt == 1] >= thr_pk).mean()), float((pk[yt == 0] >= thr_pk).mean())
 
     out = dict(test_day=TEST_DAY, n_train=int(tr.sum()), n_test=int(te.sum()),
                test_ships=int((yt == 1).sum()), test_alerts=int((yt == 0).sum()),
-               auc=float(auc), auc_peak_only=float(roc_auc_score(yt, peak)),
-               ships_kept=KEEP_SHIPS, alerts_kept=alerts_kept, alerts_kept_peak_only=alerts_kept_peak,
-               threshold=float(thr))
+               auc=float(auc), auc_peak_only=float(roc_auc_score(yt, pk)),
+               target_ships_kept=KEEP_SHIPS, ships_kept=ships_kept, alerts_kept=alerts_kept,
+               ships_kept_peak_only=ships_kept_pk, alerts_kept_peak_only=alerts_kept_pk,
+               threshold=thr)
     # rank the held-out alerts for the results page
     alerts = [(float(s), ref_) for s, ref_, lab in zip(p, np.array(ref, dtype=object)[te], yt) if lab == 0]
     ranked = sorted(alerts, key=lambda a: -a[0])
