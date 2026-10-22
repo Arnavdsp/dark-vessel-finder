@@ -1,5 +1,9 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Dark Vessel Finder</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,500;112,700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
@@ -18,7 +22,10 @@
   --bg: #0e1418; --surface: #151d22; --ink: #e6edf0; --ink-2: #a9b5bc; --muted: #7f8c94;
   --rule: #26323a; --grid: #1f2a31; --accent: #3987e5; --naive: #d95926; --quiet: #4a5862; color-scheme: dark }
 
-body { background: var(--bg); color: var(--ink); font: 17px/1.6 var(--body); }
+*, *::before, *::after { box-sizing: border-box; }
+img { max-width: 100%; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 var(--body); }
 .wrap { max-width: 1040px; margin: 0 auto; padding-block: 40px 64px;
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 .col { max-width: 68ch; }
@@ -73,7 +80,8 @@ footer { margin-top: 64px; padding-top: 18px; border-top: 1px solid var(--rule);
 @media (max-width: 520px) { body { font-size: 16px; } .card { grid-template-columns: 80px 1fr; } .card img { width: 80px; height: 80px; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
-
+</head>
+<body>
 <div class="wrap">
   <header class="col">
     <h1>Dark Vessel Finder</h1>
@@ -314,3 +322,5 @@ if (D.stale) document.getElementById("sim-h").textContent = "6. Simulation and r
   document.getElementById("simreal").innerHTML = h + "</tbody>";
 })();
 </script>
+</body>
+</html>
