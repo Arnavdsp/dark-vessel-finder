@@ -74,9 +74,16 @@ def predict_ais(report, geom: SarGeometry, cfg: Config):
     return x, y, sigma
 
 
-def find_ghosts(dets, geom: SarGeometry, along_tol_m=60.0, cross_tol_m=30.0,
+def find_ghosts(dets, offset_m, along_tol_m=60.0, cross_tol_m=30.0,
                 min_ratio_db=10.0):
-    off = geom.ambiguity_offset_m
+    """Indices of detections sitting one azimuth ambiguity from a much
+    brighter detection.
+
+    offset_m is a SarGeometry (one offset for the scene) or a per-detection
+    sequence of offsets, since each Sentinel-1 sub-swath has its own PRF.
+    """
+    if isinstance(offset_m, SarGeometry):
+        offset_m = [offset_m.ambiguity_offset_m] * len(dets)
     ghost = set()
     for i, d in enumerate(dets):
         for j, p in enumerate(dets):
@@ -86,28 +93,24 @@ def find_ghosts(dets, geom: SarGeometry, along_tol_m=60.0, cross_tol_m=30.0,
             slack = 0.4 * p.length_m
             if abs(d.x_m - p.x_m) > cross_tol_m + slack:
                 continue
-            if abs(abs(d.y_m - p.y_m) - off) > along_tol_m + slack:
+            if abs(abs(d.y_m - p.y_m) - offset_m[j]) > along_tol_m + slack:
                 continue
             if 10 * math.log10(p.peak_raw / max(d.peak_raw, 1e-9)) >= min_ratio_db:
                 ghost.add(i)
     return sorted(ghost)
 
 
-def associate(dets, ais, geom: SarGeometry, cfg: Config) -> Result:
-    res = Result()
-    res.ghosts = find_ghosts(dets, geom) if cfg.ghosts else []
-    keep = [i for i in range(len(dets)) if i not in set(res.ghosts)]
+def match(dets, preds, ids, cfg: Config, keep=None):
+    """Assign detections to predicted AIS positions inside their gates.
 
-    preds = [predict_ais(r, geom, cfg) for r in ais]
-    for r, p in zip(ais, preds):
-        res.predicted[r.ship_id] = p
+    preds is a list of (x, y, sigma). Returns (pairs, dark, unmatched_ids)
+    where pairs maps detection index -> id.
+    """
+    keep = list(range(len(dets))) if keep is None else keep
+    if not keep or not preds:
+        return {}, list(keep), list(ids)
 
-    if not keep or not ais:
-        res.dark = keep
-        res.ais_unmatched = [r.ship_id for r in ais]
-        return res
-
-    cost = np.full((len(keep), len(ais)), BIG)
+    cost = np.full((len(keep), len(preds)), BIG)
     for a, i in enumerate(keep):
         d = dets[i]
         for b, (px, py, sig) in enumerate(preds):
@@ -132,11 +135,21 @@ def associate(dets, ais, geom: SarGeometry, cfg: Config) -> Result:
                     matched.append((a, b)); used.add(b)
                     break
 
-    matched_dets = set()
-    matched_ais = set()
-    for a, b in matched:
-        res.pairs[keep[a]] = ais[b].ship_id
-        matched_dets.add(keep[a]); matched_ais.add(b)
-    res.dark = [i for i in keep if i not in matched_dets]
-    res.ais_unmatched = [ais[b].ship_id for b in range(len(ais)) if b not in matched_ais]
+    pairs = {keep[a]: ids[b] for a, b in matched}
+    used_b = {b for _, b in matched}
+    dark = [i for i in keep if i not in pairs]
+    return pairs, dark, [ids[b] for b in range(len(ids)) if b not in used_b]
+
+
+def associate(dets, ais, geom: SarGeometry, cfg: Config) -> Result:
+    res = Result()
+    res.ghosts = find_ghosts(dets, geom) if cfg.ghosts else []
+    keep = [i for i in range(len(dets)) if i not in set(res.ghosts)]
+
+    preds = [predict_ais(r, geom, cfg) for r in ais]
+    for r, p in zip(ais, preds):
+        res.predicted[r.ship_id] = p
+
+    res.pairs, res.dark, res.ais_unmatched = match(
+        dets, preds, [r.ship_id for r in ais], cfg, keep)
     return res
