@@ -1,0 +1,382 @@
+<title>Dark Vessel Finder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a chart-room working sheet. Narrow reading column, the radar scene breaks out wide. */
+:root{
+  --paper:#eef2f4; --sheet:#f8fafb; --ink:#14232f; --muted:#56687a; --rule:#c9d3db;
+  --signal:#d9480f;   /* international orange: flagged dark */
+  --matched:#0f7c7a;  /* AIS-confirmed */
+  --ghost:#7a8794;
+  --truth:#6a3fb5;
+  --scope:#0b1218;
+  --display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --body:"Source Sans 3","Segoe UI",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#0e1820; --sheet:#13202a; --ink:#e3eaef; --muted:#93a4b3; --rule:#2a3a47;
+  --signal:#ff7a3d; --matched:#3cc4bf; --ghost:#8d9aa6; --truth:#b28cff; --scope:#05090c; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#0e1820; --sheet:#13202a; --ink:#e3eaef; --muted:#93a4b3; --rule:#2a3a47;
+  --signal:#ff7a3d; --matched:#3cc4bf; --ghost:#8d9aa6; --truth:#b28cff; --scope:#05090c; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font:400 1.0625rem/1.6 var(--body);padding-inline:16px;padding-block:0 64px}
+.wrap{max-width:68rem;margin:0 auto}
+.col{max-width:44rem}
+header{padding-block:48px 24px;border-bottom:1px solid var(--rule)}
+.eyebrow{font:600 .8rem/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+h1{font:700 clamp(2.6rem,7vw,4.6rem)/.95 var(--display);letter-spacing:-.01em;margin:.35em 0 .25em;text-wrap:balance}
+h2{font:600 clamp(1.6rem,3.6vw,2.2rem)/1.05 var(--display);margin:0 0 .5em;text-wrap:balance}
+h3{font:600 1.25rem/1.2 var(--display);margin:0 0 .3em;letter-spacing:.01em}
+p{margin:0 0 1em}
+.lede{font-size:1.2rem;color:var(--ink)}
+.by{color:var(--muted);font-size:.95rem}
+code,.num{font-family:var(--mono);font-size:.88em}
+section{padding-block:40px 8px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:24px;margin-top:28px}
+.kpi .v{font:700 2.4rem/1 var(--display);font-variant-numeric:tabular-nums}
+.kpi .v s{color:var(--muted);text-decoration-thickness:2px;font-weight:500}
+.kpi .v b{color:var(--signal)}
+.kpi .l{color:var(--muted);font-size:.92rem;line-height:1.35;margin-top:6px}
+/* viewer */
+.viewer{display:grid;grid-template-columns:minmax(0,1fr) 19rem;gap:20px;margin-top:20px}
+@media (max-width:860px){.viewer{grid-template-columns:minmax(0,1fr)}}
+.scope{position:relative;background:var(--scope);border-radius:4px;overflow:hidden;aspect-ratio:1/1;max-width:100%;touch-action:none;cursor:grab}
+.scope.drag{cursor:grabbing}
+.scope svg{width:100%;height:100%;display:block}
+.scale{position:absolute;left:12px;bottom:10px;font:400 .72rem/1 var(--mono);color:#dfe7ec;display:flex;flex-direction:column;gap:4px;pointer-events:none}
+.scale i{display:block;height:3px;background:#dfe7ec}
+.compass{position:absolute;right:12px;bottom:10px;font:400 .72rem/1.3 var(--mono);color:#dfe7ec;text-align:right;pointer-events:none}
+.zoom{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:6px}
+.zoom button{width:34px;height:34px;border-radius:3px;border:1px solid #ffffff40;background:#0b1218cc;color:#fff;font:600 1.1rem/1 var(--mono);cursor:pointer}
+.side{display:flex;flex-direction:column;gap:18px;min-width:0}
+.seg{display:flex;border:1px solid var(--rule);border-radius:4px;overflow:hidden}
+.seg button{flex:1;padding:10px 6px;border:0;background:var(--sheet);color:var(--ink);font:600 .95rem/1.1 var(--display);letter-spacing:.02em;cursor:pointer;border-right:1px solid var(--rule)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--sheet)}
+button:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+.tally{display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-size:.95rem}
+.tally .num{text-align:right;font-variant-numeric:tabular-nums}
+.tally .hl{color:var(--signal);font-weight:600}
+.legend{display:grid;gap:8px;font-size:.92rem}
+.legend span{display:flex;gap:10px;align-items:center}
+.legend svg{flex:none}
+.toggles{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:.92rem}
+.toggles label{display:flex;gap:6px;align-items:center;cursor:pointer}
+.jumps{display:flex;flex-wrap:wrap;gap:8px}
+.jumps button{border:1px solid var(--rule);background:var(--sheet);color:var(--ink);padding:6px 10px;border-radius:3px;font:400 .85rem/1.2 var(--body);cursor:pointer;text-align:left}
+.jumps button:hover{border-color:var(--ink)}
+.info{background:var(--sheet);border:1px solid var(--rule);border-radius:4px;padding:14px 16px;font-size:.92rem;min-height:9rem}
+.info h3{font-size:1.1rem}
+.info dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:8px 0 0}
+.info dt{color:var(--muted)} .info dd{margin:0;font-family:var(--mono);font-size:.85rem}
+.tag{display:inline-block;font:600 .72rem/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:4px 6px;border-radius:2px;color:var(--sheet)}
+.tag.dark{background:var(--signal)} .tag.matched{background:var(--matched)} .tag.ghost{background:var(--ghost)}
+.lbl{font-size:.8rem;color:var(--muted);font-family:var(--mono);letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px}
+/* physics */
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(18rem,1fr));gap:28px;margin-top:12px}
+.two > div{min-width:0}
+.eq{font:400 1.05rem/1.4 var(--mono);background:var(--sheet);border-left:3px solid var(--ink);padding:10px 14px;margin:10px 0 12px;overflow-x:auto}
+/* charts */
+.chartbox{background:var(--sheet);border:1px solid var(--rule);border-radius:4px;padding:16px;overflow-x:auto}
+.chartbox svg text{fill:var(--ink);font-family:var(--body)}
+.chartbox svg .mut{fill:var(--muted)}
+table{border-collapse:collapse;width:100%;font-size:.93rem;font-variant-numeric:tabular-nums}
+th,td{padding:8px 10px;border-bottom:1px solid var(--rule);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{font:600 .78rem/1.2 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+tr.best td{font-weight:600}
+.tblwrap{overflow-x:auto}
+ul.plain{padding-left:1.1em;margin:0 0 1em} ul.plain li{margin-bottom:.45em}
+.note{color:var(--muted);font-size:.92rem}
+footer{margin-top:48px;padding-top:20px;border-top:1px solid var(--rule);color:var(--muted);font-size:.92rem}
+a{color:inherit;text-decoration-color:var(--signal);text-underline-offset:3px}
+@media (prefers-reduced-motion:no-preference){.scope svg g{transition:opacity .2s}}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">SAR + AIS fusion · simulation study · for PierSight</div>
+  <h1>Dark Vessel Finder</h1>
+  <p class="lede col">A dark-ship alert is a radar detection that no AIS report explains. Matched naively, two radar effects make honest ships look dark: moving ships are drawn hundreds of metres from where they really are, and big ships cast faint ghost copies kilometres away. This pipeline corrects for both and measures what that does to the alert list.</p>
+  <p class="by">Arnav Deshpande · B.Tech Space Sciences and Engineering, IIT Indore</p>
+  <div class="kpis">
+    <div class="kpi"><div class="v"><s>__FA_DR__</s> → <b>__FA_FULL__</b></div><div class="l">false dark-vessel alerts per 10 × 10 km scene (moderate sea, 30 scenes), dead-reckoning baseline vs full pipeline</div></div>
+    <div class="kpi"><div class="v"><s>__P_DR__</s> → <b>__P_FULL__</b></div><div class="l">share of alerts that are truly dark ships</div></div>
+    <div class="kpi"><div class="v">__R_DR__ → __R_FULL__</div><div class="l">share of detected dark ships still flagged, so precision does not come from flagging less</div></div>
+  </div>
+</header>
+
+<section>
+  <h2>One scene, three pipelines</h2>
+  <p class="col">Simulated X-band strip, 5 m pixels, moderate sea, 45 ships, from a 520 km orbit. Switch pipelines to see which detections each one calls dark. Click any marker for the reason. Drag to pan, scroll or use the buttons to zoom.</p>
+  <div class="viewer">
+    <div>
+      <div class="scope" id="scope">
+        <svg id="svg" viewBox="0 0 10240 10240" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Simulated SAR scene with detections">
+          <image id="img" x="0" y="0" width="10240" height="10240" preserveAspectRatio="none" href="data:image/jpeg;base64,__IMG__"></image>
+          <g id="lyr-ais"></g><g id="lyr-truth"></g><g id="lyr-det"></g>
+        </svg>
+        <div class="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zfit" aria-label="Show whole scene">⤢</button></div>
+        <div class="scale"><span id="scaleTxt">1 km</span><i id="scaleBar" style="width:60px"></i></div>
+        <div class="compass">↓ azimuth (flight)<br>→ ground range</div>
+      </div>
+    </div>
+    <div class="side">
+      <div>
+        <div class="lbl">Pipeline</div>
+        <div class="seg" role="group" aria-label="Pipeline">
+          <button data-mode="naive" aria-pressed="false">Naive</button>
+          <button data-mode="dead_reckoning" aria-pressed="false">Dead reckoning</button>
+          <button data-mode="full" aria-pressed="true">Full</button>
+        </div>
+      </div>
+      <div class="tally" id="tally"></div>
+      <div class="legend">
+        <span><svg width="18" height="18"><rect x="3" y="3" width="12" height="12" fill="none" stroke="var(--signal)" stroke-width="2.5"/></svg>Flagged dark</span>
+        <span><svg width="18" height="18"><circle cx="9" cy="9" r="6" fill="none" stroke="var(--matched)" stroke-width="2.5"/></svg>Matched to an AIS report</span>
+        <span><svg width="18" height="18"><circle cx="9" cy="9" r="6" fill="none" stroke="var(--ghost)" stroke-width="2" stroke-dasharray="3 2"/><path d="M5 5L13 13M13 5L5 13" stroke="var(--ghost)" stroke-width="1.5"/></svg>Removed as an ambiguity ghost</span>
+        <span><svg width="18" height="18"><circle cx="9" cy="9" r="7" fill="none" stroke="var(--truth)" stroke-width="1.5" stroke-dasharray="1.5 2.5"/></svg>Truly dark ship (answer key)</span>
+        <span><svg width="18" height="18"><path d="M2 9H12" stroke="#e8c547" stroke-width="1.5"/><path d="M12 5L16 9L12 13Z" fill="#e8c547"/></svg>AIS report → predicted image position</span>
+      </div>
+      <div class="toggles">
+        <label><input type="checkbox" id="tAis" checked> AIS</label>
+        <label><input type="checkbox" id="tTruth" checked> Answer key</label>
+      </div>
+      <div>
+        <div class="lbl">Jump to</div>
+        <div class="jumps" id="jumps"></div>
+      </div>
+      <div class="info" id="info"><h3>Click a marker</h3><p class="note">Each detection shows its truth label and why the current pipeline matched, flagged or removed it.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Why naive matching lies</h2>
+  <div class="two">
+    <div>
+      <h3>Moving ships are drawn in the wrong place</h3>
+      <p>A ship's motion towards or away from the radar adds Doppler, and focusing puts that Doppler at a different azimuth position:</p>
+      <div class="eq">Δy = −(R / V) · v<sub>g</sub> · sin θ</div>
+      <p>With R = __R_KM__ km, V = 7.6 km/s and θ = 30°, a 12-knot ship crossing the beam lands about <b>__SHIFT12__ m</b> along-track from its true position. A 24-knot patrol craft lands near <b>__SHIFT24__ m</b>. Using AIS speed and course, the pipeline predicts where the ship will <em>appear</em>, not only where it is.</p>
+    </div>
+    <div>
+      <h3>Bright ships cast ghosts</h3>
+      <p>The azimuth antenna pattern is sampled at the PRF, so energy folds back as a weaker copy at a fixed along-track offset:</p>
+      <div class="eq">Δy<sub>amb</sub> = λ · R · PRF / (2V) ≈ __AMB__ m</div>
+      <p>At an ambiguity-to-signal ratio of −18 dB a 250 m tanker's ghost still clears the CFAR threshold, and it has no AIS because nothing is there. The pipeline drops a detection when a detection at least 10 dB brighter sits one ambiguity offset away in azimuth.</p>
+    </div>
+  </div>
+  <p class="col">Two more fixes help: report age sets the matching gate, so a 12-minute-old report from a fast ship gets a wider gate than a fresh report from an anchored one, and an optimal one-to-one assignment replaces nearest-neighbour, so two crossing ships cannot both claim the same report.</p>
+</section>
+
+<section>
+  <h2>What each step buys</h2>
+  <p class="col">30 scenes per sea state, 45 ships each, 6 to 25% of ships dark (fishing and small craft most often), 3% of AIS reports spoofed by 2 to 5 km. Each step is added on top of the one before it.</p>
+  <div class="seg" role="group" aria-label="Sea state" id="seaSeg" style="max-width:24rem;margin-bottom:14px">
+    <button data-sea="calm" aria-pressed="false">Calm</button>
+    <button data-sea="moderate" aria-pressed="true">Moderate</button>
+    <button data-sea="rough" aria-pressed="false">Rough</button>
+  </div>
+  <div class="chartbox"><svg id="chart" width="100%" viewBox="0 0 720 320" role="img" aria-label="False alerts per scene by cause"></svg></div>
+  <div class="tblwrap" style="margin-top:14px"><table id="tbl"></table></div>
+  <p class="note" style="margin-top:10px">Widening the gate is not a substitute. With dead reckoning and an 800 m gate, the share of true alerts only reaches <span id="g800p"></span> and recall drops to <span id="g800r"></span>, because large gates let honest AIS reports swallow nearby dark ships.</p>
+</section>
+
+<section>
+  <h2>Where it still fails</h2>
+  <div class="two">
+    <div>
+      <h3>Small boats are not detected at all</h3>
+      <p>Detector recall by ship length (moderate sea):</p>
+      <div class="chartbox"><svg id="lenChart" width="100%" viewBox="0 0 380 160" role="img" aria-label="Detection recall by ship length"></svg></div>
+      <p style="margin-top:12px">Boats under 20 m cover two to four pixels and sit near the clutter level. They are also the vessels most likely to fish illegally with AIS off. This is the same tiny-object problem I worked on at DRDO. There, replacing IoU with a Wasserstein-distance match score took tiny-object matching from 0.14 to 0.72, and super-resolution with tiled inference cut missed detections. A learned detector trained on AIS-matched detections as free labels is the next step.</p>
+    </div>
+    <div>
+      <h3>Known limits of this study</h3>
+      <ul class="plain">
+        <li>Every number here comes from a simulator I wrote. The relative gains are the point, not the absolute rates.</li>
+        <li>Flat-earth geometry, one incidence angle per scene, no wakes, no along-track defocus, no land or coastline.</li>
+        <li>Ghost suppression can hide a real boat sitting exactly one ambiguity offset from a large ship. A careful adversary could use that.</li>
+        <li>Rough sea: the remaining false alerts are clutter spikes, which association cannot fix. That needs a better detector, not better matching.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="col">
+  <h2>Next steps on real data</h2>
+  <ul class="plain">
+    <li>Run on xView3-SAR (Sentinel-1 scenes with AIS-derived dark-vessel labels) to replace simulated numbers with measured ones.</li>
+    <li>Read R, V and incidence per pixel from the product annotation, so the Doppler correction varies across the swath.</li>
+    <li>Use the satellite's own AIS receiver timing. On Varuna, radar and AIS share a pass, which shrinks report age, and that is where most of the dead-reckoning error comes from.</li>
+    <li>Ask the analyst-facing question in plain language ("dark ships over 100 m inside the EEZ in the last pass") and answer it with fixed, testable query functions.</li>
+  </ul>
+  <h3 style="margin-top:20px">Questions I would like to ask the team</h3>
+  <ul class="plain">
+    <li>Does Varuna's compact reflectarray antenna push the ambiguity ratio above or below −18 dB, and does ghost handling happen on board or on the ground?</li>
+    <li>With 30-minute revisit, do you plan to link detections across passes, so that a ship that goes dark between passes is flagged on its track history rather than on one image?</li>
+  </ul>
+</section>
+
+<footer>
+  Code, tests and the evaluation script: github.com/Arnavdsp/dark-vessel-finder · Contact: arnavhpd@gmail.com · All results are from simulation (scene seed __SEED__ shown above).
+</footer>
+</div>
+
+<script>
+const SCENE = __SCENE__;
+const METRICS = __METRICS__;
+const S = SCENE.size_m;
+const svg = document.getElementById('svg');
+const NS = 'http://www.w3.org/2000/svg';
+let mode = 'full';
+let vb = {x:0,y:0,w:S,h:S};
+let selected = null;
+
+function el(tag, attrs, parent){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e;}
+function mpp(){return vb.w / svg.clientWidth;}   // metres per screen pixel
+const shipById = Object.fromEntries(SCENE.ships.map(s=>[s.id,s]));
+
+function draw(){
+  const k = mpp();
+  const lA=document.getElementById('lyr-ais'), lT=document.getElementById('lyr-truth'), lD=document.getElementById('lyr-det');
+  lA.innerHTML=''; lT.innerHTML=''; lD.innerHTML='';
+  lA.style.display = document.getElementById('tAis').checked ? '' : 'none';
+  lT.style.display = document.getElementById('tTruth').checked ? '' : 'none';
+  for(const a of SCENE.ais){
+    const p=a.pred[mode];
+    el('line',{x1:a.x,y1:a.y,x2:p[0],y2:p[1],stroke:'#e8c547','stroke-width':1.3*k,'stroke-opacity':.85},lA);
+    el('circle',{cx:a.x,cy:a.y,r:2.2*k,fill:'#e8c547'},lA);
+    el('path',{d:`M${p[0]} ${p[1]-4*k}L${p[0]+4*k} ${p[1]}L${p[0]} ${p[1]+4*k}L${p[0]-4*k} ${p[1]}Z`,fill:'#e8c547'},lA);
+    if(mode!=='naive') el('circle',{cx:p[0],cy:p[1],r:p[2],fill:'none',stroke:'#e8c547','stroke-opacity':.35,'stroke-width':k,'stroke-dasharray':`${4*k} ${4*k}`},lA);
+  }
+  for(const s of SCENE.ships){
+    if(!s.dark||!s.inimg) continue;
+    el('circle',{cx:s.ax,cy:s.ay,r:13*k,fill:'none',stroke:'var(--truth)','stroke-width':1.6*k,'stroke-dasharray':`${1.5*k} ${2.5*k}`},lT);
+  }
+  for(const d of SCENE.dets){
+    const o=d.out[mode]; const g=el('g',{tabindex:0,role:'button','aria-label':`Detection ${d.i}: ${o.c}`},lD);
+    g.style.cursor='pointer';
+    const sel = selected===d.i;
+    const sw=(sel?3.2:2.2)*k;
+    if(o.c==='dark') el('rect',{x:d.x-8*k,y:d.y-8*k,width:16*k,height:16*k,fill:'none',stroke:'var(--signal)','stroke-width':sw},g);
+    else if(o.c==='matched') el('circle',{cx:d.x,cy:d.y,r:8*k,fill:'none',stroke:'var(--matched)','stroke-width':sw},g);
+    else { el('circle',{cx:d.x,cy:d.y,r:8*k,fill:'none',stroke:'var(--ghost)','stroke-width':sw,'stroke-dasharray':`${3*k} ${2*k}`},g);
+           el('path',{d:`M${d.x-5*k} ${d.y-5*k}L${d.x+5*k} ${d.y+5*k}M${d.x+5*k} ${d.y-5*k}L${d.x-5*k} ${d.y+5*k}`,stroke:'var(--ghost)','stroke-width':1.5*k},g);}
+    el('circle',{cx:d.x,cy:d.y,r:14*k,fill:'transparent'},g);
+    const pick=()=>{selected=d.i;draw();info(d);};
+    g.addEventListener('click',pick); g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();pick();}});
+  }
+  tally();
+  scaleBar();
+}
+
+function tally(){
+  const sc=SCENE.scores[mode];
+  const fa=sc.alarms-sc.true_dark;
+  document.getElementById('tally').innerHTML=
+   `<span>Dark alerts</span><span class="num">${sc.alarms}</span>
+    <span>…truly dark</span><span class="num">${sc.true_dark}</span>
+    <span class="hl">…false alerts</span><span class="num hl">${fa}</span>
+    <span>&nbsp;&nbsp;from honest AIS ships</span><span class="num">${sc.false_from_ais_ships}</span>
+    <span>&nbsp;&nbsp;from ghosts</span><span class="num">${sc.false_from_ghosts}</span>
+    <span>&nbsp;&nbsp;from sea clutter</span><span class="num">${sc.false_from_clutter}</span>
+    <span>Dark ships the detector saw</span><span class="num">${sc.dark_ships_detected} of ${sc.dark_ships}</span>`;
+}
+
+function info(d){
+  const o=d.out[mode]; const box=document.getElementById('info');
+  let truth;
+  if(d.truth==='ship'){const s=shipById[d.ref];truth=`${s.kind.replace('_',' ')}, ${s.len} m, ${s.kn} kn, ${s.dark?(s.spoofed?'AIS spoofed':'AIS off'):'AIS on'}`;}
+  else if(d.truth==='ghost'){const s=shipById[d.ref];truth=`ghost of a ${s.len} m ${s.kind}`;}
+  else truth='sea clutter';
+  let why='';
+  if(o.c==='matched'){const s=shipById[o.ship]; const ok = d.truth==='ship' && d.ref===o.ship;
+    why=`Paired with the AIS report of ship #${o.ship}. ${ok?'Correct pairing.':'<b>Wrong pairing</b>: it belongs to a different ship.'}`;}
+  else if(o.c==='ghost') why=`Removed: a detection at least 10 dB brighter sits one ambiguity offset (${SCENE.geom.amb} m) away in azimuth.`;
+  else why = o.near!==undefined ? `No AIS prediction inside the gate. Nearest is ship #${o.near} at ${o.dist} m, gate ${o.gate} m.` : 'No AIS reports at all.';
+  const verdict = o.c==='dark' ? (d.truth_dark?'Correct alert':'False alert') : (o.c==='ghost' ? (d.truth==='ghost'?'Correctly removed':'Wrongly removed') : (d.truth_dark?'Missed dark ship':''));
+  let extra='';
+  if(d.truth==='ship'){const s=shipById[d.ref]; extra=`<dt>Doppler shift</dt><dd>${s.shift} m</dd>`;}
+  box.innerHTML=`<h3>Detection ${d.i} <span class="tag ${o.c}">${o.c}</span></h3>
+   <p style="margin:.3em 0">${why}</p>
+   <dl><dt>Truth</dt><dd>${truth}</dd>${extra}<dt>Peak</dt><dd>${d.peak} dB over clutter</dd><dt>Length est.</dt><dd>${d.len} m</dd>${verdict?`<dt>Verdict</dt><dd>${verdict}</dd>`:''}</dl>`;
+}
+
+function apply(){ svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.w} ${vb.h}`); draw(); }
+function zoomAt(f,cx,cy){
+  const nw=Math.min(S,Math.max(400,vb.w*f));
+  cx = cx ?? vb.x+vb.w/2; cy = cy ?? vb.y+vb.h/2;
+  vb.x=cx-(cx-vb.x)*nw/vb.w; vb.y=cy-(cy-vb.y)*nw/vb.h; vb.w=vb.h=nw; clamp(); apply();
+}
+function clamp(){vb.x=Math.max(-vb.w*.25,Math.min(S-vb.w*.75,vb.x));vb.y=Math.max(-vb.h*.25,Math.min(S-vb.h*.75,vb.y));}
+function centre(x,y,w){vb.w=vb.h=w;vb.x=x-w/2;vb.y=y-w/2;clamp();apply();}
+function scaleBar(){
+  const k=mpp(); const opts=[50,100,200,500,1000,2000];
+  let m=opts.find(v=>v/k>=50)||2000;
+  document.getElementById('scaleBar').style.width=(m/k)+'px';
+  document.getElementById('scaleTxt').textContent = m>=1000?`${m/1000} km`:`${m} m`;
+}
+document.getElementById('zin').onclick=()=>zoomAt(.5);
+document.getElementById('zout').onclick=()=>zoomAt(2);
+document.getElementById('zfit').onclick=()=>{vb={x:0,y:0,w:S,h:S};apply();};
+const scope=document.getElementById('scope');
+function toSvg(e){const r=svg.getBoundingClientRect();const s=Math.min(r.width,r.height);return {x:vb.x+(e.clientX-r.left)/s*vb.w,y:vb.y+(e.clientY-r.top)/s*vb.h};}
+scope.addEventListener('wheel',e=>{e.preventDefault();const p=toSvg(e);zoomAt(e.deltaY>0?1.25:.8,p.x,p.y);},{passive:false});
+let drag=null;
+scope.addEventListener('pointerdown',e=>{if(e.target.closest('button')||e.target.closest('g[role=button]'))return;drag={x:e.clientX,y:e.clientY,vx:vb.x,vy:vb.y};scope.classList.add('drag');scope.setPointerCapture(e.pointerId);});
+scope.addEventListener('pointermove',e=>{if(!drag)return;const k=mpp();vb.x=drag.vx-(e.clientX-drag.x)*k;vb.y=drag.vy-(e.clientY-drag.y)*k;clamp();svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.w} ${vb.h}`);});
+scope.addEventListener('pointerup',()=>{if(drag){drag=null;scope.classList.remove('drag');draw();}});
+document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;document.querySelectorAll('[data-mode]').forEach(x=>x.setAttribute('aria-pressed',x===b));draw();if(selected!==null)info(SCENE.dets[selected]);});
+['tAis','tTruth'].forEach(id=>document.getElementById(id).onchange=draw);
+
+// jump targets chosen from this scene's data
+const J=[];
+const firstDet=(f)=>SCENE.dets.find(f);
+const swap=firstDet(d=>d.out.dead_reckoning.c==='matched'&&d.truth==='ship'&&d.out.dead_reckoning.ship!==d.ref&&d.out.full.ship===d.ref);
+if(swap) J.push(['Doppler swap of two ships',swap]);
+const shifted=SCENE.dets.filter(d=>d.truth==='ship'&&d.out.dead_reckoning.c==='dark'&&d.out.full.c==='matched'&&!d.truth_dark).sort((a,b)=>Math.abs(shipById[b.ref].shift)-Math.abs(shipById[a.ref].shift))[0];
+if(shifted) J.push([`Displaced ${shipById[shifted.ref].len} m ${shipById[shifted.ref].kind.replace('_',' ')}`,shifted]);
+const gh=SCENE.dets.filter(d=>d.truth==='ghost').sort((a,b)=>b.peak-a.peak)[0];
+if(gh) J.push(['Brightest ghost',gh]);
+const td=SCENE.dets.find(d=>d.truth_dark&&d.out.full.c==='dark'); if(td) J.push(['A true dark ship',td]);
+const fa=SCENE.dets.find(d=>d.out.full.c==='dark'&&!d.truth_dark); if(fa) J.push(['Remaining false alert',fa]);
+const jb=document.getElementById('jumps');
+for(const [t,d] of J){const b=document.createElement('button');b.textContent=t;b.onclick=()=>{selected=d.i;centre(d.x,d.y,1600);info(d);};jb.appendChild(b);}
+
+// results chart
+const ORDER=[['naive','Naive (last report, greedy)'],['dead_reckoning','Dead reckoning'],['+doppler','+ Doppler shift'],['+adaptive_gate','+ Age-based gate'],['full','+ Ghost removal (full)']];
+const CAUSES=[['false_from_ais_ships','Honest AIS ships','var(--signal)'],['false_from_ghosts','Ghosts','var(--ghost)'],['false_from_clutter','Sea clutter','var(--truth)']];
+function chart(sea){
+  const c=document.getElementById('chart'); c.innerHTML='';
+  const m=METRICS[sea]; const L=190, W=500, top=34, bh=34, gap=14;
+  const max=Math.max(...ORDER.map(([k])=>m[k].false_alarms_per_scene));
+  const nice=Math.ceil(max/5)*5; const x=v=>L+v/nice*W;
+  for(let t=0;t<=nice;t+=5){el('line',{x1:x(t),x2:x(t),y1:top-6,y2:top+ORDER.length*(bh+gap)-gap,stroke:'var(--rule)'},c);const tx=el('text',{x:x(t),y:top+ORDER.length*(bh+gap)+12,'text-anchor':'middle','font-size':12,class:'mut'},c);tx.textContent=t;}
+  const xl=el('text',{x:L+W/2,y:top+ORDER.length*(bh+gap)+30,'text-anchor':'middle','font-size':12,class:'mut'},c); xl.textContent='false dark alerts per scene';
+  let lx=L; CAUSES.forEach(([k,n,col])=>{el('rect',{x:lx,y:6,width:12,height:12,fill:col},c);const t=el('text',{x:lx+18,y:16,'font-size':12},c);t.textContent=n;lx+=n.length*7+44;});
+  ORDER.forEach(([k,n],i)=>{const y=top+i*(bh+gap);const t=el('text',{x:L-10,y:y+bh/2+5,'text-anchor':'end','font-size':13,'font-weight':k==='full'?600:400},c);t.textContent=n;
+    let acc=0; CAUSES.forEach(([ck,,col])=>{const v=m[k][ck];if(v>0){el('rect',{x:x(acc),y,width:Math.max(0,x(acc+v)-x(acc)),height:bh,fill:col},c);}acc+=v;});
+    const lab=el('text',{x:x(acc)+8,y:y+bh/2+5,'font-size':13,'font-family':'var(--mono)'},c);lab.textContent=m[k].false_alarms_per_scene.toFixed(1);});
+  const rows=ORDER.map(([k,n])=>{const v=m[k];return `<tr class="${k==='full'?'best':''}"><td>${n}</td><td>${(v.precision*100).toFixed(0)}%</td><td>${(v.recall_of_detected*100).toFixed(0)}%</td><td>${v.false_alarms_per_scene.toFixed(2)}</td><td>${(v.pairing_accuracy*100).toFixed(0)}%</td></tr>`;}).join('');
+  document.getElementById('tbl').innerHTML=`<thead><tr><th>Pipeline</th><th>Alerts truly dark</th><th>Dark ships flagged*</th><th>False alerts / scene</th><th>AIS ships paired correctly</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td colspan="5" class="note" style="white-space:normal;text-align:left">* of the dark ships the detector saw. ${sea} sea, ${m.full.scenes} scenes.</td></tr></tfoot>`;
+  const g=m.dead_reckoning_gate800; document.getElementById('g800p').textContent=(g.precision*100).toFixed(0)+'%'; document.getElementById('g800r').textContent=(g.recall_of_detected*100).toFixed(0)+'%';
+}
+document.querySelectorAll('[data-sea]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-sea]').forEach(x=>x.setAttribute('aria-pressed',x===b));chart(b.dataset.sea);});
+chart('moderate');
+
+(function(){const c=document.getElementById('lenChart');const r=METRICS.moderate._detector_recall_by_length;const ks=Object.keys(r);
+  const L=88,W=280,top=6,bh=26,gap=10;
+  ks.forEach((k,i)=>{const y=top+i*(bh+gap);const t=el('text',{x:L-8,y:y+bh/2+5,'text-anchor':'end','font-size':13},c);t.textContent=k;
+    el('rect',{x:L,y,width:W,height:bh,fill:'var(--rule)'},c);
+    el('rect',{x:L,y,width:W*r[k],height:bh,fill:r[k]<.5?'var(--signal)':'var(--matched)'},c);
+    const v=el('text',{x:r[k]>.85?L+W*r[k]-6:L+W*r[k]+6,y:y+bh/2+5,'text-anchor':r[k]>.85?'end':'start','font-size':12,'font-family':'var(--mono)',style:'fill:'+(r[k]>.85?'var(--sheet)':'var(--ink)')},c);v.textContent=Math.round(r[k]*100)+'%';});
+})();
+
+new ResizeObserver(()=>draw()).observe(scope);
+draw();
+</script>
