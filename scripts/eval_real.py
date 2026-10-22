@@ -13,7 +13,6 @@ import numpy as np
 from pyproj import Transformer
 from scipy.spatial import cKDTree
 import shapely
-from shapely.ops import transform
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from darkvessel.landmask import land_polygons
@@ -21,7 +20,10 @@ from darkvessel.real import (REAL_PRESETS, LENGTH_BINS, run_frame, orphan_alerts
                              ghost_offset_control)
 
 OPEN_WATER_M = 2000.0     # scored zone: at least this far from the coastline
-FIXED_RADIUS_M = 60.0
+DANISH_M = 40000.0        # ...and in Danish AIS reception: within this distance of
+                          # Denmark and closer to Denmark than to any other country
+RESIGHT_M = 50.0
+TURBINE_M = 150.0
 UTM = Transformer.from_crs(4326, 25832, always_xy=True)
 
 
@@ -39,32 +41,48 @@ def coast_distance(land_utm, lon, lat):
     return shapely.distance(land_utm, shapely.points(x, y))
 
 
+def load_turbines(path="data/osm_wind.json"):
+    if not os.path.exists(path):
+        return None
+    pts = [UTM.transform(e["lon"], e["lat"]) for e in json.load(open(path))["elements"]]
+    return cKDTree(pts)
+
+
 def fixed_structure_masks(frames):
-    """A target seen within FIXED_RADIUS_M of the same spot on another pass
-    (more than an hour apart) is a turbine, platform, bridge pier or buoy.
-    AtoN broadcasts count as fixed too."""
+    """Known structures: OpenStreetMap wind turbines and AIS aids to navigation
+    within 150 m. Returns per-frame removal masks, per-frame 'seen on two
+    other days' flags, and counts.
+
+    Re-sighting is only a flag. Tested on these frames, a rule that removed
+    any target seen at the same spot on another day also removed 41% of
+    AIS-paired ships (anchorages, ferry routes), so it lowers an alert's
+    priority instead of deleting it."""
     pts, owner = [], []
     for k, fr in enumerate(frames):
         for d in fr["detections"]:
             pts.append(UTM.transform(d["lon"], d["lat"]))
             owner.append(k)
     pts, owner = np.array(pts), np.array(owner)
-    times = np.array([fr["t"].timestamp() for fr in frames])
+    day = np.array([fr["t"].date().toordinal() for fr in frames])
     tree = cKDTree(pts)
     aton = [UTM.transform(a["lon"], a["lat"]) for fr in frames for a in fr["aton"]]
     aton_tree = cKDTree(aton) if aton else None
-    masks, i = [], 0
+    turbines = load_turbines()
+    masks, resight, why, i = [], [], Counter(), 0
     for k, fr in enumerate(frames):
         m = np.zeros(len(fr["detections"]), bool)
+        r = np.zeros(len(fr["detections"]), bool)
         for j in range(len(fr["detections"])):
-            near = tree.query_ball_point(pts[i], FIXED_RADIUS_M)
-            other = {owner[n] for n in near if abs(times[owner[n]] - times[k]) > 3600}
-            m[j] = len(other) >= 1
-            if aton_tree is not None and aton_tree.query(pts[i])[0] < 150:
-                m[j] = True
+            if turbines is not None and turbines.query(pts[i])[0] < TURBINE_M:
+                m[j] = True; why["wind_turbine_osm"] += 1
+            elif aton_tree is not None and aton_tree.query(pts[i])[0] < 150:
+                m[j] = True; why["aton"] += 1
+            near = tree.query_ball_point(pts[i], RESIGHT_M)
+            r[j] = len({day[owner[n]] for n in near if day[owner[n]] != day[k]}) >= 2
             i += 1
         masks.append(m)
-    return masks
+        resight.append(r)
+    return masks, resight, why
 
 
 def length_bin(L):
@@ -100,27 +118,71 @@ def doppler_points(frames, coast):
     return rows
 
 
-def main():
-    frames = load_frames()
+def land_in_utm(frames):
     allb = [(min(d["lon"] for d in f["detections"]), min(d["lat"] for d in f["detections"]),
              max(d["lon"] for d in f["detections"]), max(d["lat"] for d in f["detections"]))
             for f in frames if f["detections"]]
     bbox = (min(b[0] for b in allb) - .5, min(b[1] for b in allb) - .5,
             max(b[2] for b in allb) + .5, max(b[3] for b in allb) + .5)
     land = land_polygons("data/ne_10m_land.zip", bbox)
-    land_utm = transform(lambda x, y: UTM.transform(x, y), land)
+    land_utm = shapely.transform(land, lambda c: np.column_stack(UTM.transform(c[:, 0], c[:, 1])))
     shapely.prepare(land_utm)
+    return land_utm
 
+
+def _countries_utm():
+    import io, zipfile, shapefile
+    from shapely.geometry import shape
+    z = zipfile.ZipFile("data/ne_10m_admin_0_countries.zip")
+    n = {k: z.read(f"ne_10m_admin_0_countries.{k}") for k in ("shp", "shx", "dbf")}
+    sf = shapefile.Reader(shp=io.BytesIO(n["shp"]), shx=io.BytesIO(n["shx"]), dbf=io.BytesIO(n["dbf"]))
+    names = [f.name for f in sf.fields[1:]]
+    out = {}
+    for rec, shp in zip(sf.records(), sf.shapes()):
+        name = dict(zip(names, rec))["ADMIN"]
+        if name in ("Denmark", "Germany", "Sweden", "Poland", "Norway", "Netherlands"):
+            g = shape(shp.__geo_interface__)
+            g = shapely.transform(g, lambda c: np.column_stack(UTM.transform(c[:, 0], c[:, 1])))
+            shapely.prepare(g)
+            out[name] = g
+    return out
+
+
+def in_danish_coverage(lon, lat, countries):
+    x, y = UTM.transform(np.asarray(lon), np.asarray(lat))
+    p = shapely.points(x, y)
+    dk = shapely.distance(countries["Denmark"], p)
+    other = np.min([shapely.distance(g, p) for k, g in countries.items() if k != "Denmark"], axis=0)
+    return (dk <= DANISH_M) & (dk < other)
+
+
+def coast_and_coverage(frames, land_utm):
+    """Per frame: (detection distance to coast, AIS distance to coast).
+    Detections outside AIS coverage get -1 so they never count as open water."""
+    countries = _countries_utm()
     coast = []
     for fr in frames:
         D, A = fr["detections"], fr["ais"]["interp"]
         dd = coast_distance(land_utm, [d["lon"] for d in D], [d["lat"] for d in D]) if D else np.zeros(0)
         ad = coast_distance(land_utm, [a["lon"] for a in A], [a["lat"] for a in A]) if A else np.zeros(0)
+        # outside Danish AIS reception a detection looks dark for want of a receiver
+        if D:
+            cov = in_danish_coverage([d["lon"] for d in D], [d["lat"] for d in D], countries)
+            dd = np.where(cov, dd, -1.0)
+        if A:
+            cov = in_danish_coverage([a["lon"] for a in A], [a["lat"] for a in A], countries)
+            ad = np.where(cov, ad, -1.0)
         coast.append((dd, ad))
-    fixed = fixed_structure_masks(frames)
+    return coast
+
+
+def main():
+    frames = load_frames()
+    coast = coast_and_coverage(frames, land_in_utm(frames))
+    fixed, resight, fixed_why = fixed_structure_masks(frames)
 
     sea_km2 = sum(fr["meta"]["sea_km2"] for fr in frames)
-    out = dict(frames=len(frames), sea_km2_processed=sea_km2, variants={})
+    out = dict(frames=len(frames), sea_km2_processed=sea_km2, fixed_reasons=dict(fixed_why), variants={})
 
     for name, cfg in REAL_PRESETS.items():
         tot = Counter()
@@ -149,7 +211,6 @@ def main():
                 b[0] += 1
                 b[1] += hit
         v = dict(tot)
-        v["alerts_open_per_1000km2"] = 1000 * tot["alerts_open"] / sea_km2
         v["orphan_share_open"] = tot["orphan_open"] / max(tot["alerts_open"], 1)
         v["pairing_rate_open"] = tot["ais_open_paired"] / max(tot["ais_open"], 1)
         v["pairing_by_length"] = {k: dict(n=n, paired=p, rate=p / max(n, 1)) for k, (n, p) in sorted(by_len.items())}
@@ -171,23 +232,24 @@ def main():
 
     # what is left after the full pipeline: open-water candidates for review
     cands = []
-    for fr, (dd, _), fm in zip(frames, coast, fixed):
+    for fr, (dd, _), fm, rs in zip(frames, coast, fixed, resight):
         res = run_frame(fr, REAL_PRESETS["+fixed_structures"], fm)
         orph = set(orphan_alerts(fr, res))
         for i in res["dark"]:
-            if dd[i] >= OPEN_WATER_M:
+            if dd[i] >= OPEN_WATER_M:  # open water inside AIS coverage
                 d = fr["detections"][i]
                 cands.append(dict(frame=fr["meta"]["item_id"], idx=i, lat=d["lat"], lon=d["lon"],
                                   peak=d["peak"], length_m=d["length_m"], coast_km=float(dd[i] / 1000),
-                                  near_unpaired_ais=i in orph))
+                                  near_unpaired_ais=i in orph, seen_other_days=bool(rs[i])))
     out["candidates"] = sorted(cands, key=lambda c: -c["peak"])
     json.dump(out, open("results/real_metrics.json", "w"), indent=1)
 
     print(f"{len(frames)} frames, {sea_km2:,.0f} km2 of sea processed")
-    print(f"{'variant':20s} {'alerts/1000km2':>14s} {'orphan%':>8s} {'AIS paired':>10s}")
+    print(f"{'variant':20s} {'alerts':>7s} {'orphans':>8s} {'ghosts-':>8s} {'fixed-':>7s} {'AIS paired':>10s}")
     for name, v in out["variants"].items():
-        print(f"{name:20s} {v['alerts_open_per_1000km2']:14.1f} {100 * v['orphan_share_open']:7.0f}% "
-              f"{100 * v['pairing_rate_open']:9.0f}%")
+        print(f"{name:20s} {v['alerts_open']:7d} {v['orphan_open']:8d} {v['ghosts_removed_open']:8d} "
+              f"{v['fixed_removed_open']:7d} {100 * v['pairing_rate_open']:9.0f}%")
+    print("fixed structures by rule:", out["fixed_reasons"])
     print("pairing by length (full):", {k: round(x["rate"], 2) for k, x in out["variants"]["+fixed_structures"]["pairing_by_length"].items()})
     print("doppler:", {k: round(v, 3) if isinstance(v, float) else v for k, v in out["doppler_check"].items()})
     print("ghost control:", out["ghost_control"])

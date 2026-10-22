@@ -25,7 +25,7 @@ LENGTH_BINS = [(0, 20), (20, 40), (40, 100), (100, 1e9)]
 class RealConfig(Config):
     fix: str = "dr"                 # which AIS fix: "last", "dr" or "interp"
     fixed_structures: bool = False  # drop cross-pass persistent targets and AtoN
-    pos_sigma_m: float = 60.0
+    pos_sigma_m: float = 90.0       # fresh-AIS residual: ~35 m along track, ~55 m range bias
 
 
 REAL_PRESETS = {
@@ -68,14 +68,15 @@ def run_frame(frame, cfg: RealConfig, fixed_mask=None):
     fixes = frame["ais"][cfg.fix]
     ghosts = find_ghosts(dets, [d["amb_m"] for d in frame["detections"]],
                          along_tol_m=150.0, cross_tol_m=40.0, min_ratio_db=12.0) if cfg.ghosts else []
-    drop = set(ghosts)
-    fixed = []
-    if cfg.fixed_structures and fixed_mask is not None:
-        fixed = [i for i in range(len(dets)) if fixed_mask[i] and i not in drop]
-        drop |= set(fixed)
-    keep = [i for i in range(len(dets)) if i not in drop]
+    keep = [i for i in range(len(dets)) if i not in set(ghosts)]
     preds = predictions(fixes, cfg)
     pairs, dark, unmatched = match(dets, preds, [f["mmsi"] for f in fixes], cfg, keep)
+    # a detection that pairs with AIS is a ship even if it sits on a ferry
+    # route seen every day, so fixed structures are only removed from alerts
+    fixed = []
+    if cfg.fixed_structures and fixed_mask is not None:
+        fixed = [i for i in dark if fixed_mask[i]]
+        dark = [i for i in dark if not fixed_mask[i]]
     return dict(pairs=pairs, dark=dark, unmatched=unmatched, ghosts=ghosts, fixed=fixed)
 
 
